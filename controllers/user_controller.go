@@ -1,76 +1,101 @@
 package controllers
 
 import (
-	"net/http"
-	"strconv"
-
-	"gin_rest_api/data"
+	"context"
+	"gin_rest_api/config"
 	"gin_rest_api/models"
+	"log"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-func GetUser(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"success": "true", "status": "200", "result": data.Users})
+var userCollection = config.GetCollection(config.DB, "users")
+
+func GetUsers(c *gin.Context) {
+
+	var users []models.User
+
+	result, err := userCollection.Find(context.TODO(), bson.M{})
+	if err != nil {
+		log.Fatal("internal server error")
+		return
+	}
+
+	for result.Next(context.TODO()) {
+		var singleUser models.User
+		err := result.Decode(&singleUser)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "msg": "internal server error"})
+			return
+		}
+		users = append(users, singleUser)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": users})
 }
 
 func CreateUser(c *gin.Context) {
 	var user models.User
 
-	c.BindJSON(&user)
+	if err := c.BindJSON(&user); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"status": false, "msg": "bad request"})
+		return
+	}
 
-	newUser := models.User{Id: user.Id, FirstName: user.FirstName, Age: user.Age}
+	newUser := models.User{
+		Id:        primitive.NewObjectID(),
+		FirstName: user.FirstName,
+		Age:       user.Age,
+	}
 
-	data.Users = append(data.Users, newUser)
+	_, err := userCollection.InsertOne(context.TODO(), newUser)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "msg": "internal server error"})
+		return
+	}
 
-	c.JSON(http.StatusCreated, gin.H{"success": true, "msg": "successfully created", "result": newUser})
+	c.JSON(http.StatusCreated, gin.H{"success": true, "msg": "successfully created..", "data": newUser})
 }
 
 func DeleteUser(c *gin.Context) {
 	userId := c.Param("userId")
 
-	id, _ := strconv.Atoi(userId)
+	objId, _ := primitive.ObjectIDFromHex(userId)
 
-	for index, v := range data.Users {
-		if v.Id == id {
-			data.Users = append(data.Users[:index], data.Users[index+1:]...)
-			c.JSON(http.StatusOK, gin.H{"success": true, "msg": "deleted successfully..", "result": v})
-			return
-		}
+	result, err := userCollection.DeleteOne(context.TODO(), bson.M{"_id": objId})
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+		return
 	}
-	c.JSON(http.StatusNotFound, gin.H{"success": false, "msg": "user not found"})
+
+	if result.DeletedCount < 1 {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "msg": "user not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "msg": "successfully deleted..", "data": result})
 }
 
 func SearchUser(c *gin.Context) {
 	userId := c.Param("userId")
 
-	id, _ := strconv.Atoi(userId)
-
-	for _, v := range data.Users {
-		if v.Id == id {
-			c.JSON(http.StatusOK, gin.H{"success": true, "item": 1, "result": v})
-			return
-		}
-	}
-	c.JSON(http.StatusNotFound, gin.H{"success": false, "msg": "not found"})
-}
-
-func UpdateUser(c *gin.Context) {
-	userId := c.Param("userId")
+	objId, _ := primitive.ObjectIDFromHex(userId)
 
 	var user models.User
 
-	c.BindJSON(&user)
+	err := userCollection.FindOne(context.TODO(), bson.M{"_id": objId}).Decode(&user)
 
-	id, _ := strconv.Atoi(userId)
-
-	for index, v := range data.Users {
-		if v.Id == id {
-			data.Users = append(data.Users[:index], data.Users[index+1:]...)
-			data.Users = append(data.Users, user)
-			c.JSON(http.StatusOK, gin.H{"success": true, "msg": "update successfully...", "result": data.Users})
-			return
-		}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+		return
 	}
-	c.JSON(http.StatusNotFound, gin.H{"success": false, "msg": "not found"})
+	
+	c.JSON(http.StatusOK, gin.H{"success": true, "msg": "found", "data": user})
+}
+
+func UpdateUser(c *gin.Context) {
 }
