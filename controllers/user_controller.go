@@ -93,9 +93,44 @@ func SearchUser(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{"success": true, "msg": "found", "data": user})
 }
 
 func UpdateUser(c *gin.Context) {
+	userId := c.Param("userId")
+
+	objId, _ := primitive.ObjectIDFromHex(userId)
+
+	var user models.User
+
+	if err := c.BindJSON(&user); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "msg": "bad request"})
+		return
+	}
+
+	update := bson.M{"firstname": user.FirstName, "age": user.Age}
+
+	result, err := userCollection.UpdateOne(context.TODO(), bson.M{"_id": objId}, bson.M{"$set": update})
+
+	if result.MatchedCount < 1 {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "msg": "user not found"})
+		return
+	}
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "msg": "internal server error"})
+		return
+	}
+
+	//get updated user object
+	var userUpdated models.User
+	if result.MatchedCount == 1 {
+		err := userCollection.FindOne(context.TODO(), bson.M{"_id": objId}).Decode(&userUpdated)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "msg": "internal server error"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "msg": "update successfully..", "data": userUpdated})
+	}
 }
